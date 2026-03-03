@@ -1,0 +1,5 @@
+/target
+*.exe
+*.dll
+*.pcm
+__pycache__/
