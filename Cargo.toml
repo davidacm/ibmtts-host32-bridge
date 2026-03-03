@@ -21,7 +21,8 @@ worker_macros = { path = "worker_macros" }
 
 [profile.release]
 opt-level = 3
-lto = true
-codegen-units = 1
-panic = "abort"
-strip = true
+lto = "fat"
+codegen-units = 16
+panic = "unwind"
+strip = false
+debug = 1
