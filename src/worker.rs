@@ -1,6 +1,4 @@
 use std::sync::{OnceLock};
-use std::sync::{LazyLock, Mutex};
-use std::collections::HashMap;
 use worker_macros::api;
 use crate::shared_memory::{SharedHeader, SharedMemory};
 use crate::libLoader::EciApi;
@@ -17,6 +15,20 @@ use windows::Win32::System::Threading::{SetEvent, WaitForSingleObject};
 const REQ_PARAMS_OFFSET: usize = 2;
 /// Buffer size to obtain the library version
 const VERSION_BUFFER_SIZE: usize= 256;
+
+// ... (tus imports y funciones actuales con #[api(N)])
+
+pub fn handle_request(request: &[u8]) -> Vec<u8> {
+    if request.len() < 2 {
+        return pack_utf_string("ERR:short request");
+    }
+    let id = u16::from_le_bytes([request[0], request[1]]);
+    let ctx = RequestContext::new(request);
+
+    // Incluimos el bloque match generado por build.rs
+    // Como las funciones están en este mismo archivo, el match las reconoce.
+    include!(concat!(env!("OUT_DIR"), "/api_dispatch.rs"))
+}
 
 struct EciHandleGuard {
     handle: ECIHand,
@@ -143,35 +155,6 @@ pub fn pack_utf_string(s: &str) -> Vec<u8> {
 
 pub type Handler = fn(&RequestContext) -> Vec<u8>;
 
-static REGISTRY: LazyLock<Mutex<HashMap<u16, Handler>>> = LazyLock::new(|| {
-    Mutex::new(HashMap::new())
-});
-
-pub fn register_handler(id: u16, h: Handler) {
-    if let Ok(mut map) = REGISTRY.lock() {
-        map.insert(id, h);
-    }
-}
-
-pub fn handle_request(request: &[u8]) -> Vec<u8> {
-    // Expects request to be full payload with first two bytes as u16 id (little-endian)
-    if request.len() < 2 {
-        return pack_utf_string("ERR:short request");
-    }
-    let id = u16::from_le_bytes([request[0], request[1]]);
-    let ctx = RequestContext::new(request);
-    let handler = {
-        let map = REGISTRY.lock().unwrap();
-        map.get(&id).copied()
-    };
-    if let Some(h) = handler {
-        h(&ctx)
-    } else {
-        let mut v = b"ERR:unknown id ".to_vec();
-        v.extend_from_slice(&id.to_le_bytes());
-        pack_bytes(v)
-    }
-}
 
 
 // ECI callback invoked in the thread where it was registered.
