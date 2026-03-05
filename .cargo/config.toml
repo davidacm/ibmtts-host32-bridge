@@ -1,0 +1,9 @@
+# .cargo/config.toml
+[target.i686-pc-windows-msvc]
+
+rustflags = [
+    "-C", "target-feature=+crt-static",
+    "-C", "link-arg=/INCREMENTAL:NO",
+    "-C", "link-arg=/NXCOMPAT",
+    "-C", "link-arg=/DYNAMICBASE",
+]

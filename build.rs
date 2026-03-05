@@ -3,6 +3,24 @@ use std::fs;
 use std::path::Path;
 
 fn main() {
+    if env::var("CARGO_CFG_TARGET_OS").unwrap() == "windows" {
+        let mut res = winres::WindowsResource::new();
+        res.set("CompanyName", "David CM <dhf360@gmail.com>");
+        res.set("FileDescription", "32-bit host using Named Pipes and shared memory for IBM TTS (eci)");
+        res.set("ProductName", "IBM TTS host 32 Bridge");
+        res.set("OriginalFilename", "ibmtts_host32.dll");
+        res.set("LegalCopyright", "Copyright © 2026 David CM. Licensed under GNU GPL v2.");
+        res.set("Comments", "This is open source free software; Source code available at: https://github.com/davidacm/ibmtts-host32-bridge");
+        res.set("ProjectURL", "https://github.com/davidacm/ibmtts-host32-bridge");
+
+        // Version: "1.0.0.0" -> The format must be u64: 0xMMmmppppRRrr
+        res.set_version_info(winres::VersionInfo::FILEVERSION, 0x0001000000000000);
+
+        res.set_manifest_file("app.manifest");
+
+        res.compile().expect("Could not compile Windows resources");
+    }
+
     let api_files = vec![
         "src/worker.rs",
     ];

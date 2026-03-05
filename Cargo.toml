@@ -15,10 +15,13 @@ path = "src/main.rs"
 [dependencies]
 worker_macros = { path = "worker_macros" }
 
+[build-dependencies]
+winres = "0.1"
+
 [profile.release]
 opt-level = 3
 lto = "fat"
-codegen-units = 16
-panic = "unwind"
-strip = false
-debug = 1
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+debug = false
