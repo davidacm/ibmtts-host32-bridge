@@ -2,11 +2,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::ffi::OsStr;
 use std::os::windows::prelude::OsStrExt;
 
-use windows::core::PCWSTR;
-use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_BROKEN_PIPE, ERROR_PIPE_CONNECTED, HANDLE, INVALID_HANDLE_VALUE};
-use windows::Win32::Storage::FileSystem::{WriteFile, FILE_FLAGS_AND_ATTRIBUTES, FILE_FLAG_OVERLAPPED, ReadFileEx};
-use windows::Win32::System::Pipes::{ConnectNamedPipe, CreateNamedPipeW, NAMED_PIPE_MODE, PIPE_READMODE_MESSAGE, PIPE_TYPE_MESSAGE, PIPE_WAIT, PIPE_UNLIMITED_INSTANCES};
-use windows::Win32::System::IO::OVERLAPPED;
+use crate::win_api::{OVERLAPPED, HANDLE, PIPE_ACCESS_DUPLEX, FILE_FLAG_OVERLAPPED, PIPE_TYPE_MESSAGE, PIPE_READMODE_MESSAGE, PIPE_WAIT, PIPE_UNLIMITED_INSTANCES, INVALID_HANDLE_VALUE, ERROR_PIPE_CONNECTED, ERROR_BROKEN_PIPE, GetLastError, ConnectNamedPipe, CreateNamedPipeW, ReadFileEx, WriteFile, CloseHandle};
+
+// Constants.
+const PIPE_BUFFER_SIZE: u32 = 65536;
+
 #[repr(C)]
 pub struct PipeContext {
     pub overlapped: OVERLAPPED,
@@ -15,17 +15,16 @@ pub struct PipeContext {
     pub alive: AtomicBool,
 }
 
-/// Rutina de completado que Windows llama en estado alerta
+/// Completion routine that Windows calls in alert state
 pub unsafe extern "system" fn completed_read_routine(
     dw_error: u32,
     dw_bytes_transfered: u32,
     lp_overlapped: *mut OVERLAPPED,
 ) {
     let ctx_ptr = lp_overlapped as *mut PipeContext;
-    // USAMOS REFERENCIA, NO BOX. No queremos liberar la memoria aquí.
     let ctx = &mut *ctx_ptr; 
 
-    // Cliente desconectado o error
+    // Client disconnected or error
     if dw_error != 0 || dw_bytes_transfered == 0 {
         ctx.alive.store(false, Ordering::Release);
         return; 
@@ -39,7 +38,7 @@ pub unsafe extern "system" fn completed_read_routine(
         return;
     }
 
-    // Relanzar lectura usando el mismo puntero que recibimos
+    // Relaunch reading using the same pointer received
     if !launch_read_ex(ctx_ptr) {
         ctx.alive.store(false, Ordering::Release);
     }
@@ -47,17 +46,17 @@ pub unsafe extern "system" fn completed_read_routine(
 
 pub unsafe fn launch_read_ex(ctx_ptr: *mut PipeContext) -> bool {
     let ctx = &mut *ctx_ptr;
-    // Resetear la estructura overlapped para la nueva operación
-    ctx.overlapped = std::mem::zeroed();
+    std::ptr::write_bytes(&mut ctx.overlapped, 0, 1);
     
     let res = ReadFileEx(
         ctx.handle,
-        Some(&mut ctx.buffer),
+        ctx.buffer.as_mut_ptr(),
+        ctx.buffer.len() as u32,
         &mut ctx.overlapped,
         Some(completed_read_routine),
     );
     
-    res.is_ok()
+    res != 0
 }
 
 
@@ -66,41 +65,41 @@ pub fn to_pcwstr(s: &str) -> Vec<u16> {
 }
 
 pub fn create_pipe_instance(pipe_name_w: &[u16]) -> Result<HANDLE, u32> {
-    let open_mode: u32 = 0x00000003u32 | FILE_FLAG_OVERLAPPED.0; // PIPE_ACCESS_DUPLEX
-    
-    // Configured for Message Type and Message Read Mode.
-    // This allows the OS to preserve message boundaries.
-    let pipe_mode = NAMED_PIPE_MODE(PIPE_TYPE_MESSAGE.0 | PIPE_READMODE_MESSAGE.0 | PIPE_WAIT.0);
+    let open_mode = PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED;
+    let pipe_mode = PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT;
 
     let handle = unsafe {
         CreateNamedPipeW(
-            PCWSTR(pipe_name_w.as_ptr()),
-            FILE_FLAGS_AND_ATTRIBUTES(open_mode),
+            pipe_name_w.as_ptr(),
+            open_mode,
             pipe_mode,
             PIPE_UNLIMITED_INSTANCES,
-            65536, // 64KB Out buffer
-            65536, // 64KB In buffer
-            0,
-            None,
+            PIPE_BUFFER_SIZE, // Out buffer
+            PIPE_BUFFER_SIZE, // In buffer
+            0,     // Default timeout
+            std::ptr::null_mut(),
         )
     };
 
     if handle == INVALID_HANDLE_VALUE {
-        return Err(unsafe { GetLastError().0 });
+        return Err(unsafe { GetLastError() });
     }
 
     Ok(handle)
 }
 
 pub fn connect_instance(handle: HANDLE) -> Result<(), u32> {
-    let conn_res = unsafe { ConnectNamedPipe(handle, None) };
-    if let Err(_) = conn_res {
-        let err = unsafe { GetLastError().0 };
-        if err as u32 == ERROR_PIPE_CONNECTED.0 as u32 {
+    let success = unsafe { ConnectNamedPipe(handle, std::ptr::null_mut()) };
+
+    if success == 0 {
+        let err = unsafe { GetLastError() };
+        if err == ERROR_PIPE_CONNECTED {
             return Ok(());
         }
+        
         return Err(err);
     }
+
     Ok(())
 }
 
@@ -110,15 +109,22 @@ pub fn write_message(handle: HANDLE, payload: &[u8]) -> Result<(), u32> {
     if payload.is_empty() { return Ok(()); }
 
     let mut written: u32 = 0;
-    // In Message Mode, WriteFile encapsulates the entire buffer as one message
-    let res = unsafe { WriteFile(handle, Some(payload), Some(&mut written), None) };
+    let success = unsafe { 
+        WriteFile(
+            handle, 
+            payload.as_ptr(),
+            payload.len() as u32,
+            &mut written,
+            std::ptr::null_mut()
+        ) 
+    };
     
-    if res.is_err() {
-        return Err(unsafe { GetLastError().0 });
+    if success == 0 {
+        return Err(unsafe { GetLastError() });
     }
     
     if written == 0 {
-        return Err(ERROR_BROKEN_PIPE.0 as u32);
+        return Err(ERROR_BROKEN_PIPE);
     }
     
     Ok(())

@@ -3,20 +3,16 @@ mod ipc;
 mod shared_memory;
 mod worker;
 mod libLoader;
-use windows::Win32::System::Threading::CreateMutexW;
-use windows::core::PCWSTR;
-use std::os::raw::{c_int, c_char};
+mod win_api;
+
+use std::os::raw::{c_int, c_char, c_void};
 use std::thread;
 use std::sync::atomic::Ordering;
-use windows::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, MsgWaitForMultipleObjectsEx, PeekMessageW,
-    TranslateMessage, MSG, PM_REMOVE, QS_ALLINPUT,
-    MWMO_ALERTABLE, MWMO_INPUTAVAILABLE, WM_QUIT,
-};
 
-use windows::Win32::Foundation::{HANDLE, HWND, CloseHandle, WAIT_IO_COMPLETION, WAIT_FAILED };
-
+pub const WAIT_FAILED: u32 = 0xFFFFFFFF;
+use crate::win_api::{HANDLE, CloseHandle, MSG, GetLastError, PeekMessageW, TranslateMessage, DispatchMessageW, CancelIoEx, MsgWaitForMultipleObjectsEx, CreateMutexW, HWND, GetProcessVersion, QS_ALLINPUT, MWMO_INPUTAVAILABLE, MWMO_ALERTABLE, WAIT_IO_COMPLETION , PM_REMOVE, WM_QUIT, ERROR_ALREADY_EXISTS};
 use ipc::to_pcwstr;
+
 
 
 fn client_thread_loop(handle: HANDLE) {
@@ -30,7 +26,6 @@ fn client_thread_loop(handle: HANDLE) {
 
         let ctx_ptr = Box::into_raw(ctx);
 
-        // Launch first read overlapped
         if !ipc::launch_read_ex(ctx_ptr) {
             let _ = Box::from_raw(ctx_ptr);
             CloseHandle(handle);
@@ -40,32 +35,35 @@ fn client_thread_loop(handle: HANDLE) {
         let mut msg = MSG::default();
 
         loop {
+            // pass null_mut() for the handles array since we only wait for messages/APCs
             let wait = MsgWaitForMultipleObjectsEx(
-                None,
+                0,
+                std::ptr::null(),
                 u32::MAX, // INFINITE
                 QS_ALLINPUT,
                 MWMO_INPUTAVAILABLE | MWMO_ALERTABLE,
             );
+
             if wait == WAIT_FAILED {
-                eprintln!("MsgWaitForMultipleObjectsEx failed");
+                eprintln!("MsgWaitForMultipleObjectsEx failed: {}", GetLastError());
                 break;
             }
-            // APC exec (ReadFileEx completed)
+
+            // APC executed (ReadFileEx completed)
             if wait == WAIT_IO_COMPLETION {
                 let ctx = &*ctx_ptr;
-                // If completion marked as dead, exit
                 if !ctx.alive.load(Ordering::Acquire) {
                     break;
                 }
                 continue;
             }
-            // WINDOWS MESSAGES
-            while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).into() {
+
+            // Process Windows messages (required for COM or SAPI if used)
+            while PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {
                 if msg.message == WM_QUIT {
                     eprintln!("WM_QUIT received");
                     break;
                 }
-
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
@@ -75,8 +73,9 @@ fn client_thread_loop(handle: HANDLE) {
                 break;
             }
         }
+        
         eprintln!("Client thread exiting cleanly, cleaning up IO...");
-        let _ = windows::Win32::System::IO::CancelIoEx(handle, None);
+        CancelIoEx(handle, std::ptr::null_mut());
         CloseHandle(handle);
         if !ctx_ptr.is_null() {
             let _ = Box::from_raw(ctx_ptr);
@@ -88,9 +87,10 @@ fn client_thread_loop(handle: HANDLE) {
 pub fn run_host() {
     let mutex_name_w = to_pcwstr("Global\\IBMTTS_Host_Unique_Mutex");
     unsafe {
-        let _ = CreateMutexW(None, true, PCWSTR(mutex_name_w.as_ptr()));
-        if windows::Win32::Foundation::GetLastError() == windows::Win32::Foundation::ERROR_ALREADY_EXISTS {
-            return; // There is already an instance running
+        let _ = CreateMutexW(std::ptr::null_mut(), 1, mutex_name_w.as_ptr());
+        if GetLastError() == ERROR_ALREADY_EXISTS {
+            eprintln!("There is already an instance running.");
+            return;
         }
     }
 
@@ -105,20 +105,18 @@ pub fn run_host() {
                 println!("Waiting for client...");
                 if let Err(err) = ipc::connect_instance(handle) {
                     eprintln!("ConnectNamedPipe failed: {}", err);
-                    ipc::close_handle(handle);
+                    unsafe { CloseHandle(handle); }
                     continue;
                 }
 
-                // Transfer raw pointer to thread to avoid HANDLE Send issues
-                let raw = handle.0 as isize;
+                let handle_raw = handle as isize;
                 thread::spawn(move || {
-                    let h = HANDLE(raw as *mut _);
-                    client_thread_loop(h);
+                    client_thread_loop(handle_raw as *mut c_void);
                 });
             }
             Err(err) => {
                 eprintln!("CreateNamedPipeW failed: {}", err);
-                std::thread::sleep(std::time::Duration::from_secs(1));
+                thread::sleep(std::time::Duration::from_secs(1));
                 continue;
             }
         }
@@ -146,19 +144,13 @@ pub extern "C" fn StartHost(
     });
 }
 
-
-use windows::Win32::System::Threading::GetProcessVersion;
-
 fn start_parent_monitor(pid: u32) {
-    std::thread::spawn(move || {
+    thread::spawn(move || {
         loop {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            
-            // GetProcessVersion returns 0 if the PID is invalid or has ended
+            thread::sleep(std::time::Duration::from_millis(500));
+            // GetProcessVersion returns 0 if the PID is invalid or terminated
             let version = unsafe { GetProcessVersion(pid) };
-            
             if version == 0 {
-                // The parent process disappeared
                 std::process::exit(0);
             }
         }

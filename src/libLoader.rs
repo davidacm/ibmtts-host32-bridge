@@ -1,37 +1,70 @@
 #![allow(non_snake_case)]
 #![allow(non_camel_case_types)]
 
-use libloading::{Library};
-use std::sync::Arc;
 use std::os::raw::{c_char, c_short, c_void};
+use crate::win_api::{LoadLibraryW, FreeLibrary, GetLastError, GetProcAddress, FARPROC};
+use crate::defs::*;
 
-use super::defs::*;
+type HMODULE = *mut c_void;
+
+
 
 macro_rules! define_eci_api {
     ($( $name:ident ( $($arg_name:ident : $arg_ty:ty),* ) $(-> $ret:ty)? ; )*) => {
         
-        // 1. generating the types of function pointers
+        // Types of function pointers
         $(
             pub type $name = unsafe extern "system" fn($($arg_ty),*) $(-> $ret)?;
         )*
 
-        // defining the Struct containing the pointers as public fields
         pub struct EciApi {
             $( pub $name: $name, )*
-            _lib: Arc<Library>,
+            handle: HMODULE,
         }
+
+        // implementing Drop so the library is automatically released
+        impl Drop for EciApi {
+            fn drop(&mut self) {
+                if !self.handle.is_null() {
+                    unsafe { FreeLibrary(self.handle) };
+                }
+            }
+        }
+
+        unsafe impl Send for EciApi {}
+        unsafe impl Sync for EciApi {}
 
         impl EciApi {
             pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
                 unsafe {
-                    let lib = Arc::new(Library::new(path)?);
-                    
+                    let mut path_encoded: Vec<u16> = path.encode_utf16().collect();
+                    path_encoded.push(0);
+
+                    let h_lib = LoadLibraryW(path_encoded.as_ptr());
+                    if h_lib.is_null() {
+                        let err_code = GetLastError();
+                        return Err(format!(
+                            "Failed to load DLL at: {} (Windows Error Code: {})", 
+                            path, err_code
+                        ).into());
+                    }
+
                     Ok(EciApi {
                         $(
-                            // load each symbol using its name as a string
-                            $name: *lib.get(concat!(stringify!($name), "\0").as_bytes())?,
+                            $name: {
+                                let sym = GetProcAddress(h_lib, concat!(stringify!($name), "\0").as_ptr() as *const c_char);
+                                if sym.is_null() {
+                                    let err_code = GetLastError();
+                                    FreeLibrary(h_lib);
+                                    return Err(format!(
+                                        "Symbol not found: {} (Windows Error Code: {})", 
+                                        stringify!($name), err_code
+                                    ).into());
+                                }
+                                std::mem::transmute::<FARPROC, $name>(sym)
+                            },
                         )*
-                        _lib: lib,
+                        handle: h_lib,
                     })
                 }
             }
