@@ -78,9 +78,7 @@ fn main() {
 "match id {{
 {}
     _ => {{
-        let mut v = b\"ERR:unknown id \".to_vec();
-        v.extend_from_slice(&id.to_le_bytes());
-        pack_bytes(v)
+        pack_error(&format!(\"unknown id: {{}}\", id))
     }}
 }}", match_arms);
 
