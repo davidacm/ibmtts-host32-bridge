@@ -7,7 +7,7 @@ use worker_macros::api;
 
 use crate::win_api::{SetEvent, WaitForSingleObject, WAIT_OBJECT_0};
 use crate::shared_memory::{SharedHeader, SharedMemory};
-use crate::libLoader::EciApi;
+use crate::libLoader::{ EciApi, Library};
 use crate::defs::{ECICallbackReturn, ECIDictHand, ECIHand, ECIInputText};
 
 
@@ -225,7 +225,7 @@ fn load_library(req: &RequestContext) -> Vec<u8> {
             let _ = ECI_API.set(api); // If the set fails, it's because another thread won the race
             pack_int(1)
         }
-        Err(e) => pack_utf_string(&format!("ERR:load:{}", e)),
+        Err(e) => pack_error(&format!("ERR:load:{}", e)),
     }
 }
 
@@ -455,4 +455,30 @@ fn eci_delete(ctx: &RequestContext) -> Vec<u8> {
     let eci_handle = ctx.get_int(0) as usize as ECIHand;
     let result = unsafe { (api.eciDelete)(eci_handle) as i32};
     pack_int(result)
+}
+
+
+// --- Global storage for the ETIDEV library ---
+// this lib is required to be loaded in the same proces for some eci.dll versions of IBM.
+// We use a OnceLock to keep the Library instance alive for the duration of the process.
+static ETIDEV_LIB: OnceLock<Library> = OnceLock::new();
+
+#[api(242)]
+fn load_etidev(req: &RequestContext) -> Vec<u8> {
+    let path_bytes = req.get_body();
+    let path_str = String::from_utf8_lossy(path_bytes).trim_matches('\0').to_string();
+
+    if ETIDEV_LIB.get().is_some() {
+        return pack_int(1); // Already loaded, success.
+    }
+
+    match Library::load(&path_str) {
+        Ok(lib) => {
+            let _ = ETIDEV_LIB.set(lib); 
+            pack_int(1) // Success
+        }
+        Err(e) => {
+            pack_error(&format!("ERR:load_etidev:{}", e))
+        }
+    }
 }

@@ -7,28 +7,58 @@ use crate::defs::*;
 
 type HMODULE = *mut c_void;
 
+/// Simple wrapper to manage the lifecycle of a Windows DLL handle.
+pub struct Library {
+    handle: HMODULE,
+}
 
+impl Library {
+    /// Loads a library from the specified path.
+    pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        unsafe {
+            let mut path_encoded: Vec<u16> = path.encode_utf16().collect();
+            path_encoded.push(0);
+
+            let h_lib = LoadLibraryW(path_encoded.as_ptr());
+            if h_lib.is_null() {
+                let err_code = GetLastError();
+                return Err(format!(
+                    "Failed to load DLL at: {} (Windows Error Code: {})", 
+                    path, err_code
+                ).into());
+            }
+            Ok(Self { handle: h_lib })
+        }
+    }
+
+    pub fn handle(&self) -> HMODULE {
+        self.handle
+    }
+}
+
+impl Drop for Library {
+    fn drop(&mut self) {
+        if !self.handle.is_null() {
+            unsafe { FreeLibrary(self.handle) };
+        }
+    }
+}
+
+// Safety traits for cross-thread usage.
+unsafe impl Send for Library {}
+unsafe impl Sync for Library {}
 
 macro_rules! define_eci_api {
     ($( $name:ident ( $($arg_name:ident : $arg_ty:ty),* ) $(-> $ret:ty)? ; )*) => {
         
-        // Types of function pointers
+        // Define function pointer types.
         $(
             pub type $name = unsafe extern "system" fn($($arg_ty),*) $(-> $ret)?;
         )*
 
         pub struct EciApi {
             $( pub $name: $name, )*
-            handle: HMODULE,
-        }
-
-        // implementing Drop so the library is automatically released
-        impl Drop for EciApi {
-            fn drop(&mut self) {
-                if !self.handle.is_null() {
-                    unsafe { FreeLibrary(self.handle) };
-                }
-            }
+            _lib: Library,
         }
 
         unsafe impl Send for EciApi {}
@@ -36,26 +66,16 @@ macro_rules! define_eci_api {
 
         impl EciApi {
             pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+                let lib = Library::load(path)?;
+                let h_lib = lib.handle();
+
                 unsafe {
-                    let mut path_encoded: Vec<u16> = path.encode_utf16().collect();
-                    path_encoded.push(0);
-
-                    let h_lib = LoadLibraryW(path_encoded.as_ptr());
-                    if h_lib.is_null() {
-                        let err_code = GetLastError();
-                        return Err(format!(
-                            "Failed to load DLL at: {} (Windows Error Code: {})", 
-                            path, err_code
-                        ).into());
-                    }
-
                     Ok(EciApi {
                         $(
                             $name: {
                                 let sym = GetProcAddress(h_lib, concat!(stringify!($name), "\0").as_ptr() as *const c_char);
                                 if sym.is_null() {
                                     let err_code = GetLastError();
-                                    FreeLibrary(h_lib);
                                     return Err(format!(
                                         "Symbol not found: {} (Windows Error Code: {})", 
                                         stringify!($name), err_code
@@ -64,7 +84,7 @@ macro_rules! define_eci_api {
                                 std::mem::transmute::<FARPROC, $name>(sym)
                             },
                         )*
-                        handle: h_lib,
+                        _lib: lib,
                     })
                 }
             }
