@@ -1,8 +1,13 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::ffi::OsStr;
 use std::os::windows::prelude::OsStrExt;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::win_api::{OVERLAPPED, HANDLE, PIPE_ACCESS_DUPLEX, FILE_FLAG_OVERLAPPED, PIPE_TYPE_MESSAGE, PIPE_READMODE_MESSAGE, PIPE_WAIT, PIPE_UNLIMITED_INSTANCES, INVALID_HANDLE_VALUE, ERROR_PIPE_CONNECTED, ERROR_BROKEN_PIPE, GetLastError, ConnectNamedPipe, CreateNamedPipeW, ReadFileEx, WriteFile, CloseHandle};
+use crate::win_api::{
+    CloseHandle, ConnectNamedPipe, CreateNamedPipeW, GetLastError, ReadFileEx, WriteFile,
+    ERROR_BROKEN_PIPE, ERROR_PIPE_CONNECTED, FILE_FLAG_OVERLAPPED, HANDLE, INVALID_HANDLE_VALUE,
+    OVERLAPPED, PIPE_ACCESS_DUPLEX, PIPE_READMODE_MESSAGE, PIPE_TYPE_MESSAGE,
+    PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
+};
 
 // Constants.
 const PIPE_BUFFER_SIZE: u32 = 65536;
@@ -22,12 +27,12 @@ pub unsafe extern "system" fn completed_read_routine(
     lp_overlapped: *mut OVERLAPPED,
 ) {
     let ctx_ptr = lp_overlapped as *mut PipeContext;
-    let ctx = &mut *ctx_ptr; 
+    let ctx = &mut *ctx_ptr;
 
     // Client disconnected or error
     if dw_error != 0 || dw_bytes_transfered == 0 {
         ctx.alive.store(false, Ordering::Release);
-        return; 
+        return;
     }
 
     let data = &ctx.buffer[..dw_bytes_transfered as usize];
@@ -47,7 +52,7 @@ pub unsafe extern "system" fn completed_read_routine(
 pub unsafe fn launch_read_ex(ctx_ptr: *mut PipeContext) -> bool {
     let ctx = &mut *ctx_ptr;
     std::ptr::write_bytes(&mut ctx.overlapped, 0, 1);
-    
+
     let res = ReadFileEx(
         ctx.handle,
         ctx.buffer.as_mut_ptr(),
@@ -55,10 +60,9 @@ pub unsafe fn launch_read_ex(ctx_ptr: *mut PipeContext) -> bool {
         &mut ctx.overlapped,
         Some(completed_read_routine),
     );
-    
+
     res != 0
 }
-
 
 pub fn to_pcwstr(s: &str) -> Vec<u16> {
     OsStr::new(s).encode_wide().chain(Some(0)).collect()
@@ -76,7 +80,7 @@ pub fn create_pipe_instance(pipe_name_w: &[u16]) -> Result<HANDLE, u32> {
             PIPE_UNLIMITED_INSTANCES,
             PIPE_BUFFER_SIZE, // Out buffer
             PIPE_BUFFER_SIZE, // In buffer
-            0,     // Default timeout
+            0,                // Default timeout
             std::ptr::null_mut(),
         )
     };
@@ -96,37 +100,38 @@ pub fn connect_instance(handle: HANDLE) -> Result<(), u32> {
         if err == ERROR_PIPE_CONNECTED {
             return Ok(());
         }
-        
+
         return Err(err);
     }
 
     Ok(())
 }
 
-
 /// Writes a payload as a single atomic Message.
 pub fn write_message(handle: HANDLE, payload: &[u8]) -> Result<(), u32> {
-    if payload.is_empty() { return Ok(()); }
+    if payload.is_empty() {
+        return Ok(());
+    }
 
     let mut written: u32 = 0;
-    let success = unsafe { 
+    let success = unsafe {
         WriteFile(
-            handle, 
+            handle,
             payload.as_ptr(),
             payload.len() as u32,
             &mut written,
-            std::ptr::null_mut()
-        ) 
+            std::ptr::null_mut(),
+        )
     };
-    
+
     if success == 0 {
         return Err(unsafe { GetLastError() });
     }
-    
+
     if written == 0 {
         return Err(ERROR_BROKEN_PIPE);
     }
-    
+
     Ok(())
 }
 

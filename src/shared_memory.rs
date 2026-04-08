@@ -1,8 +1,8 @@
-use std::ptr::{null_mut};
-use crate::win_api::{PAGE_READWRITE, FILE_MAP_WRITE, HANDLE, INVALID_HANDLE_VALUE, CreateFileMappingW, GetLastError, MapViewOfFile, UnmapViewOfFile, CloseHandle, CreateEventW};
-
-
-
+use crate::win_api::{
+    CloseHandle, CreateEventW, CreateFileMappingW, GetLastError, MapViewOfFile, UnmapViewOfFile,
+    FILE_MAP_WRITE, HANDLE, INVALID_HANDLE_VALUE, PAGE_READWRITE,
+};
+use std::ptr::null_mut;
 
 #[repr(C, packed)]
 pub struct SharedHeader {
@@ -16,7 +16,7 @@ pub struct SharedMemory {
     pub view: *mut u8,
     pub h_evt_ready: HANDLE,
     pub h_evt_processed: HANDLE,
-    pub size: usize
+    pub size: usize,
 }
 
 impl SharedMemory {
@@ -25,7 +25,11 @@ impl SharedMemory {
         let evt_ready_name = format!("Local\\eci_ready_{:x}\0", eci_id);
         let evt_proc_name = format!("Local\\eci_proc_{:x}\0", eci_id);
 
-        let to_w = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+        let to_w = |s: &str| {
+            s.encode_utf16()
+                .chain(std::iter::once(0))
+                .collect::<Vec<u16>>()
+        };
 
         // CreateFileMappingW(hFile, lpAttributes, flProtect, sizeHigh, sizeLow, lpName)
         let h_map = CreateFileMappingW(
@@ -34,7 +38,7 @@ impl SharedMemory {
             PAGE_READWRITE,
             0,
             size as u32,
-            to_w(&shm_name).as_ptr()
+            to_w(&shm_name).as_ptr(),
         );
 
         if h_map.is_null() || h_map == INVALID_HANDLE_VALUE {
@@ -52,12 +56,12 @@ impl SharedMemory {
         let h_evt_ready = CreateEventW(null_mut(), 0, 0, to_w(&evt_ready_name).as_ptr());
         let h_evt_processed = CreateEventW(null_mut(), 0, 0, to_w(&evt_proc_name).as_ptr());
 
-        Ok(Self { 
-            h_map, 
-            view: view as *mut u8, 
-            h_evt_ready, 
-            h_evt_processed, 
-            size 
+        Ok(Self {
+            h_map,
+            view: view as *mut u8,
+            h_evt_ready,
+            h_evt_processed,
+            size,
         })
     }
 
@@ -72,9 +76,15 @@ impl Drop for SharedMemory {
             if !self.view.is_null() {
                 UnmapViewOfFile(self.view as *const std::os::raw::c_void);
             }
-            if !self.h_evt_ready.is_null() { CloseHandle(self.h_evt_ready); }
-            if !self.h_evt_processed.is_null() { CloseHandle(self.h_evt_processed); }
-            if !self.h_map.is_null() { CloseHandle(self.h_map); }
+            if !self.h_evt_ready.is_null() {
+                CloseHandle(self.h_evt_ready);
+            }
+            if !self.h_evt_processed.is_null() {
+                CloseHandle(self.h_evt_processed);
+            }
+            if !self.h_map.is_null() {
+                CloseHandle(self.h_map);
+            }
         }
     }
 }

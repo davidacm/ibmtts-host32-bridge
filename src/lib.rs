@@ -1,19 +1,22 @@
 mod defs;
 mod ipc;
-mod shared_memory;
-mod worker;
 mod libLoader;
+mod shared_memory;
 mod win_api;
+mod worker;
 
-use std::os::raw::{c_int, c_char, c_void};
-use std::thread;
+use std::os::raw::{c_char, c_int, c_void};
 use std::sync::atomic::Ordering;
+use std::thread;
 
 pub const WAIT_FAILED: u32 = 0xFFFFFFFF;
-use crate::win_api::{HANDLE, CloseHandle, MSG, GetLastError, PeekMessageW, TranslateMessage, DispatchMessageW, CancelIoEx, MsgWaitForMultipleObjectsEx, CreateMutexW, HWND, GetProcessVersion, QS_ALLINPUT, MWMO_INPUTAVAILABLE, MWMO_ALERTABLE, WAIT_IO_COMPLETION , PM_REMOVE, WM_QUIT, ERROR_ALREADY_EXISTS};
+use crate::win_api::{
+    CancelIoEx, CloseHandle, CreateMutexW, DispatchMessageW, GetLastError, GetProcessVersion,
+    MsgWaitForMultipleObjectsEx, PeekMessageW, TranslateMessage, ERROR_ALREADY_EXISTS, HANDLE,
+    HWND, MSG, MWMO_ALERTABLE, MWMO_INPUTAVAILABLE, PM_REMOVE, QS_ALLINPUT, WAIT_IO_COMPLETION,
+    WM_QUIT,
+};
 use ipc::to_pcwstr;
-
-
 
 fn client_thread_loop(handle: HANDLE) {
     unsafe {
@@ -73,7 +76,7 @@ fn client_thread_loop(handle: HANDLE) {
                 break;
             }
         }
-        
+
         eprintln!("Client thread exiting cleanly, cleaning up IO...");
         CancelIoEx(handle, std::ptr::null_mut());
         CloseHandle(handle);
@@ -105,7 +108,9 @@ pub fn run_host() {
                 println!("Waiting for client...");
                 if let Err(err) = ipc::connect_instance(handle) {
                     eprintln!("ConnectNamedPipe failed: {}", err);
-                    unsafe { CloseHandle(handle); }
+                    unsafe {
+                        CloseHandle(handle);
+                    }
                     continue;
                 }
 
@@ -134,7 +139,10 @@ pub extern "C" fn StartHost(
         if !lpsz_cmd_line.is_null() {
             unsafe {
                 let c_str = std::ffi::CStr::from_ptr(lpsz_cmd_line).to_string_lossy();
-                let clean_pid = c_str.chars().filter(|c| c.is_ascii_digit()).collect::<String>();
+                let clean_pid = c_str
+                    .chars()
+                    .filter(|c| c.is_ascii_digit())
+                    .collect::<String>();
                 if let Ok(parent_pid) = clean_pid.parse::<u32>() {
                     start_parent_monitor(parent_pid);
                 }

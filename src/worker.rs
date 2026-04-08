@@ -1,21 +1,20 @@
 use core::ffi::c_void;
 use std::cell::RefCell;
-use std::sync::{OnceLock};
 use std::os::raw::c_char;
+use std::sync::OnceLock;
 
 use worker_macros::api;
 
-use crate::win_api::{SetEvent, WaitForSingleObject, WAIT_OBJECT_0};
-use crate::shared_memory::{SharedHeader, SharedMemory};
-use crate::libLoader::{ EciApi, Library};
 use crate::defs::{ECICallbackReturn, ECIDictHand, ECIHand, ECIInputText};
-
+use crate::libLoader::{EciApi, Library};
+use crate::shared_memory::{SharedHeader, SharedMemory};
+use crate::win_api::{SetEvent, WaitForSingleObject, WAIT_OBJECT_0};
 
 // --- Protocol Constants ---
 /// Offset where the 2 bytes of the message ID end and the parameters begin
 const REQ_PARAMS_OFFSET: usize = 2;
 /// Buffer size to obtain the library version
-const VERSION_BUFFER_SIZE: usize= 256;
+const VERSION_BUFFER_SIZE: usize = 256;
 
 // (current imports and functions with #[api(N)])
 
@@ -71,7 +70,7 @@ impl<'a> RequestContext<'a> {
 
     // Read 4-byte little-endian int parameter at index `pos` (0-based)
     pub fn get_int(&self, pos: usize) -> i32 {
-        let off = (pos).checked_mul(4).unwrap_or(usize::MAX)+REQ_PARAMS_OFFSET;
+        let off = (pos).checked_mul(4).unwrap_or(usize::MAX) + REQ_PARAMS_OFFSET;
         if off + 4 > self.data.len() {
             return 0;
         }
@@ -93,11 +92,11 @@ impl<'a> RequestContext<'a> {
 
         // Case 1: Offset out of bounds -> we return a static slice with only the NUL
         if off >= self.data.len() {
-            return &[0]; 
+            return &[0];
         }
 
         let bytes_from_off = &self.data[off..];
-        
+
         // Case 2: Find the null terminator
         if let Some(nul_pos) = bytes_from_off.iter().position(|&b| b == 0) {
             // return the slice including the 0
@@ -165,17 +164,14 @@ pub fn pack_error(s: &str) -> Vec<u8> {
     out
 }
 
-
 pub type Handler = fn(&RequestContext) -> Vec<u8>;
-
-
 
 // ECI callback invoked in the thread where it was registered.
 unsafe extern "system" fn eci_callback(
-    h_engine: ECIHand, 
-    msg: u32, 
-    lparam: i32, 
-    _p_data: *mut c_void
+    h_engine: ECIHand,
+    msg: u32,
+    lparam: i32,
+    _p_data: *mut c_void,
 ) -> ECICallbackReturn {
     CURRENT_SHM.with(|cell| {
         if let Some(ref shm) = *cell.borrow() {
@@ -209,11 +205,12 @@ unsafe extern "system" fn eci_callback(
 // #[api(1)]
 // fn hello(req: &RequestContext) -> Vec<u8> { ... }
 
-
 #[api(1)]
 fn load_library(req: &RequestContext) -> Vec<u8> {
     let path_bytes = req.get_body();
-    let path_str = String::from_utf8_lossy(path_bytes).trim_matches('\0').to_string();
+    let path_str = String::from_utf8_lossy(path_bytes)
+        .trim_matches('\0')
+        .to_string();
 
     // try to initialize the global API only once
     if ECI_API.get().is_some() {
@@ -231,7 +228,10 @@ fn load_library(req: &RequestContext) -> Vec<u8> {
 
 #[api(2)]
 fn eci_version(_req: &RequestContext) -> Vec<u8> {
-    let api = match eci() { Ok(a) => a, Err(e) => return e };
+    let api = match eci() {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     // Allocate buffer for version string
     let mut buf = vec![0u8; VERSION_BUFFER_SIZE];
 
@@ -242,22 +242,25 @@ fn eci_version(_req: &RequestContext) -> Vec<u8> {
     pack_bytes(buf)
 }
 
-
 #[api(3)]
 fn eci_new(_ctx: &RequestContext) -> Vec<u8> {
-    let api = match eci() { Ok(a) => a, Err(e) => return e };
+    let api = match eci() {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     let handle = unsafe { (api.eciNew)() };
     CURRENT_ECI_GUARD.with(|cell| {
-        *cell.borrow_mut() = Some(EciHandleGuard { 
-            handle, 
-        });
+        *cell.borrow_mut() = Some(EciHandleGuard { handle });
     });
     pack_uint(handle as u32)
 }
 
 #[api(4)]
 fn eci_new_ex(ctx: &RequestContext) -> Vec<u8> {
-    let api = match eci() { Ok(a) => a, Err(e) => return e };
+    let api = match eci() {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     // Expect first parameter as 4-byte int (language dialect enum)
     let val = ctx.get_int(0) as i32;
     let handle: ECIHand = unsafe { (api.eciNewEx)(val) };
@@ -266,63 +269,75 @@ fn eci_new_ex(ctx: &RequestContext) -> Vec<u8> {
 
 #[api(5)]
 fn set_buffer(ctx: &RequestContext) -> Vec<u8> {
-    let api = match eci() { Ok(a) => a, Err(e) => return e };
+    let api = match eci() {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     let eci_handle = ctx.get_int(0) as u32;
     let samples = ctx.get_int(1) as u32 as usize;
-    
+
     // calculate size: samples * 2 (i16) + 12 bytes header
     let size = (samples * 2).saturating_add(12);
     match unsafe { SharedMemory::create(eci_handle, size) } {
         Ok(shm) => {
             unsafe {
                 let eci_buf_ptr = shm.get_eci_buffer_ptr();
-                (api.eciRegisterCallback)(eci_handle as ECIHand, eci_callback, std::ptr::null_mut());
+                (api.eciRegisterCallback)(
+                    eci_handle as ECIHand,
+                    eci_callback,
+                    std::ptr::null_mut(),
+                );
                 // Configure Output Buffer (ECI writes from byte 12)
                 (api.eciSetOutputBuffer)(eci_handle as ECIHand, samples as i32, eci_buf_ptr);
 
                 // Save in TLS for callback
                 let shm_name = format!("Local\\eci_shm_{:x}", eci_handle);
                 let evt_name = format!("Local\\eci_ready_{:x}", eci_handle);
-                
+
                 CURRENT_SHM.with(|cell| *cell.borrow_mut() = Some(shm));
 
                 let resp = format!("SHM:{};EVT:{}", shm_name, evt_name);
                 pack_utf_string(&resp)
             }
-        },
-        Err(e) => pack_error(&format!("ERR:{}", e))
+        }
+        Err(e) => pack_error(&format!("ERR:{}", e)),
     }
 }
 
 #[api(6)]
 fn eci_add_text(ctx: &RequestContext) -> Vec<u8> {
-    let api = match eci() { Ok(a) => a, Err(e) => return e };
+    let api = match eci() {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     // param 0: eciHandle (as 32-bit value)
     // param 1: pointer/offset to text string
     let eci_handle = ctx.get_int(0) as usize as ECIHand;
     let text_bytes = ctx.get_string(1);
-    let result = unsafe {
-        (api.eciAddText)(eci_handle, text_bytes.as_ptr() as ECIInputText)
-    };
+    let result = unsafe { (api.eciAddText)(eci_handle, text_bytes.as_ptr() as ECIInputText) };
     pack_int(result)
 }
 
 #[api(7)]
 fn eci_insert_index(ctx: &RequestContext) -> Vec<u8> {
-    let api = match eci() { Ok(a) => a, Err(e) => return e };
+    let api = match eci() {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     // param 0: eciHandle (as 32-bit value)
     // param 1: index value
     let eci_handle = ctx.get_int(0) as usize as ECIHand;
     let index = ctx.get_int(1);
-        let result = unsafe {
-            (api.eciInsertIndex)(eci_handle, index)
-        };
+    let result = unsafe { (api.eciInsertIndex)(eci_handle, index) };
     pack_int(result as i32)
 }
 
 #[api(8)]
 fn eci_synthesize(ctx: &RequestContext) -> Vec<u8> {
-    let api = match eci() { Ok(a) => a, Err(e) => return e };
+    let api = match eci() {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     // param 0: eciHandle (as 32-bit value)
     let eci_handle = ctx.get_int(0) as usize as ECIHand;
 
@@ -330,10 +345,12 @@ fn eci_synthesize(ctx: &RequestContext) -> Vec<u8> {
     pack_int(result as i32)
 }
 
-
 #[api(9)]
 fn eci_get_available_languages(_ctx: &RequestContext) -> Vec<u8> {
-    let api = match eci() { Ok(a) => a, Err(e) => return e };
+    let api = match eci() {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     unsafe {
         let mut n_langs: i32 = 0;
         (api.eciGetAvailableLanguages)(std::ptr::null_mut(), &mut n_langs);
@@ -342,10 +359,7 @@ fn eci_get_available_languages(_ctx: &RequestContext) -> Vec<u8> {
             return pack_int(n_langs);
         }
         let mut langs = vec![0i32; n_langs as usize];
-        let result = (api.eciGetAvailableLanguages)(
-            langs.as_mut_ptr() as *mut i32, 
-            &mut n_langs
-        );
+        let result = (api.eciGetAvailableLanguages)(langs.as_mut_ptr() as *mut i32, &mut n_langs);
 
         if result >= 0 {
             let mut out = Vec::with_capacity(4 + (langs.len() * 4));
@@ -362,7 +376,10 @@ fn eci_get_available_languages(_ctx: &RequestContext) -> Vec<u8> {
 
 #[api(10)]
 fn eci_stop(ctx: &RequestContext) -> Vec<u8> {
-    let api = match eci() { Ok(a) => a, Err(e) => return e };
+    let api = match eci() {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     let eci_handle = ctx.get_int(0) as usize as ECIHand;
     let result = unsafe { (api.eciStop)(eci_handle) };
     pack_int(result)
@@ -370,7 +387,10 @@ fn eci_stop(ctx: &RequestContext) -> Vec<u8> {
 
 #[api(11)]
 fn eci_get_param(ctx: &RequestContext) -> Vec<u8> {
-    let api = match eci() { Ok(a) => a, Err(e) => return e };
+    let api = match eci() {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     let eci_handle = ctx.get_int(0) as usize as ECIHand;
     let param_id = ctx.get_int(1);
     let result = unsafe { (api.eciGetParam)(eci_handle, param_id) };
@@ -379,7 +399,10 @@ fn eci_get_param(ctx: &RequestContext) -> Vec<u8> {
 
 #[api(12)]
 fn eci_set_param(ctx: &RequestContext) -> Vec<u8> {
-    let api = match eci() { Ok(a) => a, Err(e) => return e };
+    let api = match eci() {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     let eci_handle = ctx.get_int(0) as usize as ECIHand;
     let param_id = ctx.get_int(1);
     let value = ctx.get_int(2);
@@ -389,7 +412,10 @@ fn eci_set_param(ctx: &RequestContext) -> Vec<u8> {
 
 #[api(13)]
 fn eci_get_voice_param(ctx: &RequestContext) -> Vec<u8> {
-    let api = match eci() { Ok(a) => a, Err(e) => return e };
+    let api = match eci() {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     let eci_handle = ctx.get_int(0) as usize as ECIHand;
     let voice_idx = ctx.get_int(1);
     let param_id = ctx.get_int(2);
@@ -399,7 +425,10 @@ fn eci_get_voice_param(ctx: &RequestContext) -> Vec<u8> {
 
 #[api(14)]
 fn eci_set_voice_param(ctx: &RequestContext) -> Vec<u8> {
-    let api = match eci() { Ok(a) => a, Err(e) => return e };
+    let api = match eci() {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     let eci_handle = ctx.get_int(0) as usize as ECIHand;
     let voice_id = ctx.get_int(1);
     let param_id = ctx.get_int(2);
@@ -410,7 +439,10 @@ fn eci_set_voice_param(ctx: &RequestContext) -> Vec<u8> {
 
 #[api(15)]
 fn eci_copy_voice(ctx: &RequestContext) -> Vec<u8> {
-    let api = match eci() { Ok(a) => a, Err(e) => return e };
+    let api = match eci() {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     let eci_handle = ctx.get_int(0) as usize as ECIHand;
     let from_idx = ctx.get_int(1);
     let to_idx = ctx.get_int(2);
@@ -420,7 +452,10 @@ fn eci_copy_voice(ctx: &RequestContext) -> Vec<u8> {
 
 #[api(16)]
 fn eci_new_dict(ctx: &RequestContext) -> Vec<u8> {
-    let api = match eci() { Ok(a) => a, Err(e) => return e };
+    let api = match eci() {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     let eci_handle = ctx.get_int(0) as usize as ECIHand;
     let dict_handle = unsafe { (api.eciNewDict)(eci_handle) };
     pack_uint(dict_handle as u32)
@@ -428,21 +463,32 @@ fn eci_new_dict(ctx: &RequestContext) -> Vec<u8> {
 
 #[api(17)]
 fn eci_load_dict(ctx: &RequestContext) -> Vec<u8> {
-    let api = match eci() { Ok(a) => a, Err(e) => return e };
+    let api = match eci() {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     let eci_handle = ctx.get_int(0) as usize as ECIHand;
     let dict_handle = ctx.get_int(1) as usize as ECIDictHand;
     let dict_vol = ctx.get_int(2);
     let filename_bytes = ctx.get_string(3);
 
     let result = unsafe {
-        (api.eciLoadDict)(eci_handle, dict_handle,  dict_vol, filename_bytes.as_ptr() as *const c_void)
+        (api.eciLoadDict)(
+            eci_handle,
+            dict_handle,
+            dict_vol,
+            filename_bytes.as_ptr() as *const c_void,
+        )
     };
     pack_int(result as i32)
 }
 
 #[api(18)]
 fn eci_set_dict(ctx: &RequestContext) -> Vec<u8> {
-    let api = match eci() { Ok(a) => a, Err(e) => return e };
+    let api = match eci() {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     let eci_handle = ctx.get_int(0) as usize as ECIHand;
     let dict_handle = ctx.get_int(1) as usize as ECIDictHand;
     let result = unsafe { (api.eciSetDict)(eci_handle, dict_handle) };
@@ -451,12 +497,14 @@ fn eci_set_dict(ctx: &RequestContext) -> Vec<u8> {
 
 #[api(19)]
 fn eci_delete(ctx: &RequestContext) -> Vec<u8> {
-    let api = match eci() { Ok(a) => a, Err(e) => return e };
+    let api = match eci() {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     let eci_handle = ctx.get_int(0) as usize as ECIHand;
-    let result = unsafe { (api.eciDelete)(eci_handle) as i32};
+    let result = unsafe { (api.eciDelete)(eci_handle) as i32 };
     pack_int(result)
 }
-
 
 // --- Global storage for the ETIDEV library ---
 // this lib is required to be loaded in the same proces for some eci.dll versions of IBM.
@@ -466,7 +514,9 @@ static ETIDEV_LIB: OnceLock<Library> = OnceLock::new();
 #[api(242)]
 fn load_etidev(req: &RequestContext) -> Vec<u8> {
     let path_bytes = req.get_body();
-    let path_str = String::from_utf8_lossy(path_bytes).trim_matches('\0').to_string();
+    let path_str = String::from_utf8_lossy(path_bytes)
+        .trim_matches('\0')
+        .to_string();
 
     if ETIDEV_LIB.get().is_some() {
         return pack_int(1); // Already loaded, success.
@@ -474,11 +524,9 @@ fn load_etidev(req: &RequestContext) -> Vec<u8> {
 
     match Library::load(&path_str) {
         Ok(lib) => {
-            let _ = ETIDEV_LIB.set(lib); 
+            let _ = ETIDEV_LIB.set(lib);
             pack_int(1) // Success
         }
-        Err(e) => {
-            pack_error(&format!("ERR:load_etidev:{}", e))
-        }
+        Err(e) => pack_error(&format!("ERR:load_etidev:{}", e)),
     }
 }

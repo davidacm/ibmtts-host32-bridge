@@ -2,7 +2,7 @@
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
 
-use std::os::raw::{ c_int, c_void};
+use std::os::raw::{c_int, c_void};
 
 // Enums replicated from eci.h
 pub type Boolean = c_int;
@@ -108,7 +108,6 @@ pub enum ECICallbackReturn {
     eciDataProcessed,
     eciDataAbort,
 }
-
 
 pub type EciCallback = unsafe extern "system" fn(
     hEngine: ECIHand,

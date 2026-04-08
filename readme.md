@@ -198,4 +198,59 @@ See the file src\worker.rs to know about the order of the parameters for each en
 3. Send ID `5` (set_buffer) to initialize shared memory audio streaming.
 4. Set the events and open the shared memory block.
 
+### suggested flow diagram:
 
+```mermaid
+flowchart LR
+    %% STYLES
+    classDef driver fill:#E3F2FD,stroke:#1565C0,stroke-width:2px,color:#0D47A1,font-weight:bold
+    classDef proxy fill:#FFF8E1,stroke:#FF8F00,stroke-width:2px,color:#7F5100,font-weight:bold
+    classDef host fill:#E8F5E9,stroke:#2E7D32,stroke-width:2px,color:#1B5E20,font-weight:bold
+    classDef ipc fill:#F5F5F5,stroke:#78909C,stroke-width:2px,stroke-dasharray:5 5,color:#37474F,font-weight:bold
+    classDef logic fill:#FFFFFF,stroke:#37474F,stroke-width:1px,color:#000
+
+    %% DRIVER LANE
+    subgraph DRIVER_LANE["Driver"]
+        direction TB
+        A["1. 💻 NVDA Driver"]:::driver --> B{"2. 32-bit or 64-bit?"}:::logic
+        B -- "32-bit" --> C["3. Load native eci.dll"]:::driver
+        B -- "64-bit" --> D["3. Proxy (Python EciDLL)"]:::proxy
+    end
+
+    %% CONTROL PIPE
+    subgraph PIPE_LANE["Named Pipe (Control / RPC)"]
+        E["\\\\.\\pipe\\ibmtts_host32"]:::ipc
+    end
+
+    D -- "4. Send command + params" --> E
+    E -- "5. Execute command" --> F["6. Host 32-bit"]:::host
+
+    %% HOST PROCESS
+    subgraph HOST_ZONE["Host 32-bit Process"]
+        direction TB
+        F --- G["7. eci.dll"]:::host
+    end
+
+    %% AUDIO ENGINE
+    subgraph AUDIO_ENGINE["Audio Engine / Low Latency"]
+        H["1. Shared Memory Buffer"]:::ipc
+        I["2. Event: READY"]:::ipc
+        J["3. Event: PROCESSED"]:::ipc
+    end
+
+    %% FLOW LOGIC (Callback Thread)
+    G -.->|4. Callback writes audio| H
+    G -.->|5. Signal READY event| I
+    J -.->|6. Unblock callback| G
+
+    %% FLOW LOGIC (Proxy Worker Thread)
+    I -.->|7. Wait for READY event| D
+    D -.->|8. Read and process audio| H
+    D -.->|9. Signal PROCESSED event| J
+
+    %% CONTAINER STYLES
+    style DRIVER_LANE fill:#fcfcfc,stroke:#CCC,stroke-width:1px
+    style PIPE_LANE fill:#fcfcfc,stroke:#CCC,stroke-width:1px
+    style HOST_ZONE fill:#fcfcfc,stroke:#CCC,stroke-width:1px
+    style AUDIO_ENGINE fill:#fafafa,stroke:#BBB,stroke-width:1px,stroke-dasharray:5 5
+```

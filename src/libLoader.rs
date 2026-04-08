@@ -1,9 +1,9 @@
 #![allow(non_snake_case)]
 #![allow(non_camel_case_types)]
 
-use std::os::raw::{c_char, c_short, c_void};
-use crate::win_api::{LoadLibraryW, FreeLibrary, GetLastError, GetProcAddress, FARPROC};
 use crate::defs::*;
+use crate::win_api::{FreeLibrary, GetLastError, GetProcAddress, LoadLibraryW, FARPROC};
+use std::os::raw::{c_char, c_short, c_void};
 
 type HMODULE = *mut c_void;
 
@@ -23,9 +23,10 @@ impl Library {
             if h_lib.is_null() {
                 let err_code = GetLastError();
                 return Err(format!(
-                    "Failed to load DLL at: {} (Windows Error Code: {})", 
+                    "Failed to load DLL at: {} (Windows Error Code: {})",
                     path, err_code
-                ).into());
+                )
+                .into());
             }
             Ok(Self { handle: h_lib })
         }
@@ -50,7 +51,7 @@ unsafe impl Sync for Library {}
 
 macro_rules! define_eci_api {
     ($( $name:ident ( $($arg_name:ident : $arg_ty:ty),* ) $(-> $ret:ty)? ; )*) => {
-        
+
         // Define function pointer types.
         $(
             pub type $name = unsafe extern "system" fn($($arg_ty),*) $(-> $ret)?;
@@ -77,7 +78,7 @@ macro_rules! define_eci_api {
                                 if sym.is_null() {
                                     let err_code = GetLastError();
                                     return Err(format!(
-                                        "Symbol not found: {} (Windows Error Code: {})", 
+                                        "Symbol not found: {} (Windows Error Code: {})",
                                         stringify!($name), err_code
                                     ).into());
                                 }

@@ -1,4 +1,4 @@
-use std::os::raw::{c_void, c_char,};
+use std::os::raw::{c_char, c_void};
 
 // Basic Windows types
 pub type HANDLE = *mut c_void;
@@ -41,7 +41,10 @@ pub struct MSG {
 
 #[repr(C)]
 #[derive(Default)]
-pub struct POINT { pub x: i32, pub y: i32 }
+pub struct POINT {
+    pub x: i32,
+    pub y: i32,
+}
 
 #[repr(C)]
 pub struct OVERLAPPED {
@@ -57,17 +60,60 @@ pub struct OVERLAPPED {
 extern "system" {
     pub fn GetLastError() -> u32;
     pub fn CloseHandle(h: HANDLE) -> BOOL;
-    pub fn CreateMutexW(lpMutexAttributes: *mut c_void, bInitialOwner: BOOL, lpName: *const u16) -> HANDLE;
-    pub fn CreateNamedPipeW(lpName: *const u16, dwOpenMode: u32, dwPipeMode: u32, nMaxInstances: u32, nOutBufSize: u32, nInBufSize: u32, nDefaultTimeOut: u32, lpSecurityAttrs: *mut c_void) -> HANDLE;
+    pub fn CreateMutexW(
+        lpMutexAttributes: *mut c_void,
+        bInitialOwner: BOOL,
+        lpName: *const u16,
+    ) -> HANDLE;
+    pub fn CreateNamedPipeW(
+        lpName: *const u16,
+        dwOpenMode: u32,
+        dwPipeMode: u32,
+        nMaxInstances: u32,
+        nOutBufSize: u32,
+        nInBufSize: u32,
+        nDefaultTimeOut: u32,
+        lpSecurityAttrs: *mut c_void,
+    ) -> HANDLE;
     pub fn ConnectNamedPipe(hNamedPipe: HANDLE, lpOverlapped: *mut c_void) -> BOOL;
-    pub fn WriteFile(hFile: HANDLE, lpBuffer: *const u8, nNumberOfBytesToWrite: u32, lpNumberOfBytesWritten: *mut u32, lpOverlapped: *mut c_void) -> BOOL;
-    pub fn ReadFileEx(hFile: HANDLE, lpBuffer: *mut u8, nNumberOfBytesToRead: u32, lpOverlapped: *mut OVERLAPPED, lpCompletionRoutine: Option<unsafe extern "system" fn(u32, u32, *mut OVERLAPPED)>) -> BOOL;
+    pub fn WriteFile(
+        hFile: HANDLE,
+        lpBuffer: *const u8,
+        nNumberOfBytesToWrite: u32,
+        lpNumberOfBytesWritten: *mut u32,
+        lpOverlapped: *mut c_void,
+    ) -> BOOL;
+    pub fn ReadFileEx(
+        hFile: HANDLE,
+        lpBuffer: *mut u8,
+        nNumberOfBytesToRead: u32,
+        lpOverlapped: *mut OVERLAPPED,
+        lpCompletionRoutine: Option<unsafe extern "system" fn(u32, u32, *mut OVERLAPPED)>,
+    ) -> BOOL;
     pub fn CancelIoEx(hFile: HANDLE, lpOverlapped: *mut c_void) -> BOOL;
     pub fn GetProcessVersion(processId: u32) -> u32;
-    pub fn CreateFileMappingW(hFile: HANDLE, lpFileMappingAttributes: *mut c_void, flProtect: u32, dwMaximumSizeHigh: u32, dwMaximumSizeLow: u32, lpName: *const u16) -> HANDLE;
-    pub fn MapViewOfFile(hFileMappingObject: HANDLE, dwDesiredAccess: u32, dwFileOffsetHigh: u32, dwFileOffsetLow: u32, dwNumberOfBytesToMap: usize) -> *mut c_void;
+    pub fn CreateFileMappingW(
+        hFile: HANDLE,
+        lpFileMappingAttributes: *mut c_void,
+        flProtect: u32,
+        dwMaximumSizeHigh: u32,
+        dwMaximumSizeLow: u32,
+        lpName: *const u16,
+    ) -> HANDLE;
+    pub fn MapViewOfFile(
+        hFileMappingObject: HANDLE,
+        dwDesiredAccess: u32,
+        dwFileOffsetHigh: u32,
+        dwFileOffsetLow: u32,
+        dwNumberOfBytesToMap: usize,
+    ) -> *mut c_void;
     pub fn UnmapViewOfFile(lpBaseAddress: *const c_void) -> BOOL;
-    pub fn CreateEventW(lpEventAttributes: *mut c_void, bManualReset: BOOL, bInitialState: BOOL, lpName: *const u16) -> HANDLE;
+    pub fn CreateEventW(
+        lpEventAttributes: *mut c_void,
+        bManualReset: BOOL,
+        bInitialState: BOOL,
+        lpName: *const u16,
+    ) -> HANDLE;
     pub fn SetEvent(hEvent: HANDLE) -> BOOL;
     pub fn WaitForSingleObject(hHandle: HANDLE, dwMilliseconds: u32) -> u32;
     pub fn LoadLibraryW(lpLibFileName: *const u16) -> HMODULE;
@@ -77,8 +123,20 @@ extern "system" {
 
 #[link(name = "user32")]
 extern "system" {
-    pub fn MsgWaitForMultipleObjectsEx(nCount: u32, pHandles: *const HANDLE, dwMilliseconds: u32, dwWakeMask: u32, dwFlags: u32) -> u32;
-    pub fn PeekMessageW(lpMsg: *mut MSG, hWnd: HWND, wMsgFilterMin: u32, wMsgFilterMax: u32, wRemoveMsg: u32) -> BOOL;
+    pub fn MsgWaitForMultipleObjectsEx(
+        nCount: u32,
+        pHandles: *const HANDLE,
+        dwMilliseconds: u32,
+        dwWakeMask: u32,
+        dwFlags: u32,
+    ) -> u32;
+    pub fn PeekMessageW(
+        lpMsg: *mut MSG,
+        hWnd: HWND,
+        wMsgFilterMin: u32,
+        wMsgFilterMax: u32,
+        wRemoveMsg: u32,
+    ) -> BOOL;
     pub fn TranslateMessage(lpMsg: *const MSG) -> BOOL;
     pub fn DispatchMessageW(lpMsg: *const MSG) -> isize;
 }
