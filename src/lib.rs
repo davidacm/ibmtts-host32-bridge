@@ -87,16 +87,6 @@ fn client_thread_loop(handle: HANDLE) {
     }
 }
 
-
-unsafe extern "system" fn shutdown_handler(ctrl_type: u32) -> i32 {
-    if ctrl_type == crate::win_api::CTRL_SHUTDOWN_EVENT {
-        // ignore shutdown signals to allow graceful cleanup in the main loop
-        return 1; 
-    }
-    0 
-}
-
-
 pub fn run_host() {
     let mutex_name_w = to_pcwstr("Global\\IBMTTS_Host_Unique_Mutex");
     unsafe {
@@ -104,9 +94,6 @@ pub fn run_host() {
         if GetLastError() == ERROR_ALREADY_EXISTS {
             eprintln!("There is already an instance running.");
             return;
-        }
-        if crate::win_api::SetConsoleCtrlHandler(Some(shutdown_handler), 1) == 0 {
-            eprintln!("Failed to set control handler: {}", GetLastError());
         }
     }
 

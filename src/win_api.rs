@@ -1,7 +1,6 @@
 use std::os::raw::{c_char, c_void};
 
 // Basic Windows types
-pub type PHANDLER_ROUTINE = Option<unsafe extern "system" fn(dwCtrlType: u32) -> i32>;
 pub type HANDLE = *mut c_void;
 pub type HWND = *mut c_void;
 pub type HMODULE = *mut c_void;
@@ -9,7 +8,6 @@ pub type BOOL = i32;
 pub type FARPROC = *mut c_void;
 
 // Constants.
-pub const CTRL_SHUTDOWN_EVENT: u32 = 6;
 pub const INVALID_HANDLE_VALUE: HANDLE = -1isize as *mut c_void;
 pub const PIPE_ACCESS_DUPLEX: u32 = 0x00000003;
 pub const FILE_FLAG_OVERLAPPED: u32 = 0x40000000;
@@ -60,7 +58,6 @@ pub struct OVERLAPPED {
 // Function Signatures
 #[link(name = "kernel32")]
 extern "system" {
-    pub fn SetConsoleCtrlHandler(HandlerRoutine: PHANDLER_ROUTINE, Add: i32) -> i32;
     pub fn GetLastError() -> u32;
     pub fn CloseHandle(h: HANDLE) -> BOOL;
     pub fn CreateMutexW(

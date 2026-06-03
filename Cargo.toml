@@ -19,7 +19,7 @@ worker_macros = { path = "worker_macros" }
 winres = "0.1"
 
 [profile.release]
-opt-level = "z"
+opt-level = 3
 lto = "fat"
 codegen-units = 1
 panic = "abort"
